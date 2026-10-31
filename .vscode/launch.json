@@ -1,23 +1,51 @@
 {
-    // 使用 IntelliSense 了解相关属性。 
-    // 悬停以查看现有属性的描述。
-    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    // PostgreSQL 18.6 调试配置(依赖 CodeLLDB 插件: vadimcn.vscode-lldb)
+    //
+    // ⚠️ 当前二进制是 -O2 无 -g 编译的,源码行断点/变量查看不会生效;
+    //    需在 001.build-script/001.PostgreSQL_Build_mac.sh 的 configure 里追加
+    //    --enable-debug --enable-cassert CFLAGS="-O0 -g3" 后重新编译。
+    //
+    // 若上次调试异常退出导致启动报 lock file 错误,删除
+    // 003.DATADIR/DATA/postmaster.pid 后重试。
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "PostgresSQL-16.2-debug",
+            // 场景 1: 调试服务端启动流程(PostmasterMain / 崩溃恢复 / 后台进程管理)
+            // 调试器直接前台拉起 postmaster,停止调试即停库。
+            // 注意: postmaster fork 出的 backend 子进程不在调试范围内,
+            //       调试 SQL 执行请用场景 2 attach。
+            // 连接: 002.BIN_DIR/psql -p 5432
+            "name": "18.6-Launch-Server(调试 postmaster 启动流程)",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/000.SOURCE_CODE/PostgreSQL-16.2/000.build-output/002.BIN_DIR/postgres",
+            "program": "${workspaceFolder}/000.SOURCE_CODE/002.PostgreSQL-18.6/000.build-output/002.BIN_DIR/postgres",
             "args": [
                 "-d",
                 "5",
                 "-D",
-                "${workspaceFolder}/000.SOURCE_CODE/PostgreSQL-16.2/001.build-script/003.DATA"
+                "${workspaceFolder}/000.SOURCE_CODE/002.PostgreSQL-18.6/000.build-output/003.DATADIR/DATA"
             ],
-            "preLaunchTask": "000.PostgreSQL-16.2-debug-start-up.sh",
-            "postDebugTask": "001.PostgreSQL-16.2-debug-shutdown.sh"
+            "cwd": "${workspaceFolder}",
+            // PG 进程间大量使用 SIGUSR1/SIGUSR2/SIGCHLD 等信号通信,
+            // 必须放行给程序,否则调试器会反复停在信号上
+            "preRunCommands": [
+                "process handle --stop false --pass true SIGUSR1 SIGUSR2 SIGCHLD SIGURG SIGPIPE"
+            ]
+        },
+        {
+            // 场景 2: 调试一条 SQL 的执行(最常用)
+            // 步骤:
+            //   ① 先正常启动数据库(pg_ctl start 或用场景 1 启动后停止调试改用普通方式)
+            //   ② psql 连接后执行 SELECT pg_backend_pid(); 记下 PID
+            //   ③ 运行本配置,在进程列表中选中该 PID
+            //   ④ 在源码打断点,回到 psql 执行 SQL
+            "name": "18.6-Attach-Backend(附加后端进程,调试 SQL 执行)",
+            "type": "lldb",
+            "request": "attach",
+            "pid": "${command:pickProcess}",
+            "postRunCommands": [
+                "process handle --stop false --pass true SIGUSR1 SIGUSR2 SIGCHLD SIGURG SIGPIPE"
+            ]
         }
     ]
 }
-
